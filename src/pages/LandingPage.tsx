@@ -81,7 +81,7 @@ export const LandingPage: React.FC = () => {
               Learn What You Need. Become What You Want.
             </h1>
             <p className="text-base sm:text-lg text-slate-600 dark:text-slate-300 leading-relaxed max-w-xl">
-              Discover your verified skill gaps for real software, data, cloud, and design careers. Follow an adaptive roadmap that responds to your quiz scores, study schedule, and goals—guided by Pathy, your bilingual study companion.
+              SkillPath AI helps students understand their skills, identify what is missing, learn effectively, track real progress, and prepare confidently for the career they want—guided by Pathy, your bilingual study companion.
             </p>
 
             <div className="flex flex-wrap items-center gap-3 pt-1">

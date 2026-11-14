@@ -25,6 +25,35 @@ function getGeminiClient(): GoogleGenAI | null {
   });
 }
 
+async function proxyToFastApi(
+  endpoint: string,
+  req: express.Request,
+): Promise<Record<string, unknown> | null> {
+  const fastApiUrl = process.env.FASTAPI_BACKEND_URL?.trim();
+  if (!fastApiUrl) return null;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (req.headers.authorization) {
+      headers.Authorization = req.headers.authorization;
+    }
+    const resp = await fetch(`${fastApiUrl.replace(/\/$/, '')}${endpoint}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req.body ?? {}),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (resp.ok) {
+      return (await resp.json()) as Record<string, unknown>;
+    }
+  } catch (err) {
+    console.warn(`FastAPI proxy fallback (${endpoint}):`, err instanceof Error ? err.message : err);
+  }
+  return null;
+}
+
 async function startServer() {
   const app = express();
   app.use(express.json({ limit: '2mb' }));
@@ -36,6 +65,7 @@ async function startServer() {
     res.json({
       ok: true,
       geminiConfigured: hasGemini,
+      fastApiConfigured: Boolean(process.env.FASTAPI_BACKEND_URL?.trim()),
       mode: hasGemini ? 'live' : 'offline-deterministic',
     });
   });
@@ -44,6 +74,12 @@ async function startServer() {
     const { message, mode, language, learnerContext, lessonContext, history } = req.body ?? {};
     if (!message || typeof message !== 'string') {
       res.status(400).json({ error: 'Message is required.' });
+      return;
+    }
+
+    const proxied = await proxyToFastApi('/api/v1/mentor/chat', req);
+    if (proxied) {
+      res.json(proxied);
       return;
     }
 
@@ -106,6 +142,12 @@ async function startServer() {
   });
 
   app.post('/api/project-review', async (req, res) => {
+    const proxied = await proxyToFastApi('/api/v1/projects/review', req);
+    if (proxied) {
+      res.json(proxied);
+      return;
+    }
+
     const { projectTitle, description, githubUrl, liveUrl, rubricCriteria, skills } = req.body ?? {};
     const ai = getGeminiClient();
     if (!ai) {

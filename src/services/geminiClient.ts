@@ -1,3 +1,4 @@
+import { firebaseAuthService } from './authService';
 import {
   AssessmentAttempt,
   LearnerProfile,
@@ -137,13 +138,23 @@ function buildOfflineMentorReply(payload: MentorRequestPayload): string {
   ].join('\n\n');
 }
 
+async function buildApiHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = await firebaseAuthService.getIdToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 export async function sendMentorMessage(
   payload: MentorRequestPayload,
 ): Promise<{ reply: string; source: 'gemini' | 'offline'; notice: string | null }> {
   try {
+    const headers = await buildApiHeaders();
     const res = await fetch('/api/mentor/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         message: payload.message,
         mode: payload.mode,
@@ -196,9 +207,10 @@ export async function requestProjectReview(params: {
   notice: string;
 }> {
   try {
+    const headers = await buildApiHeaders();
     const res = await fetch('/api/project-review', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         projectTitle: params.idea.title,
         description: params.description,

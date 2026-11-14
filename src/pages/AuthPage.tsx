@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Info, Mail, Lock, User } from 'lucide-react';
-import { localAuthService, AUTH_NOTICE } from '../services/authService';
-import { loginSchema, registerSchema, forgotPasswordSchema } from '../lib/validation';
+import { ArrowLeft, Info, Lock, Mail, User } from 'lucide-react';
+import { AUTH_NOTICE, firebaseAuthService } from '../services/authService';
+import { forgotPasswordSchema, loginSchema, registerSchema } from '../lib/validation';
 import { useAppStore } from '../store/useAppStore';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -25,6 +25,7 @@ export const AuthPage: React.FC = () => {
 
   const navigate = useNavigate();
   const setAuthenticatedUser = useAppStore((s) => s.setAuthenticatedUser);
+  const hydrateFromCloud = useAppStore((s) => s.hydrateFromCloud);
   const loginDemoStudent = useAppStore((s) => s.loginDemoStudent);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -45,8 +46,11 @@ export const AuthPage: React.FC = () => {
       }
       setLoading(true);
       try {
-        const user = await localAuthService.loginWithEmail(email, password);
+        const user = await firebaseAuthService.loginWithEmail(email, password);
         setAuthenticatedUser(user, false);
+        if (user.emailVerified) {
+          await hydrateFromCloud(user.id);
+        }
         const prof = useAppStore.getState().profile;
         navigate(prof?.onboardingCompleted ? '/dashboard' : '/onboarding');
       } catch (err) {
@@ -66,7 +70,7 @@ export const AuthPage: React.FC = () => {
       }
       setLoading(true);
       try {
-        const user = await localAuthService.registerWithEmail(name, email, password);
+        const user = await firebaseAuthService.registerWithEmail(name, email, password);
         setAuthenticatedUser(user, true);
         navigate('/onboarding');
       } catch (err) {
@@ -82,21 +86,30 @@ export const AuthPage: React.FC = () => {
       }
       setLoading(true);
       try {
-        const res = await localAuthService.requestPasswordReset(email);
+        const res = await firebaseAuthService.requestPasswordReset(email);
         setInfoMessage(res.message);
+      } catch (err) {
+        setFormError(err instanceof Error ? err.message : 'Unable to send password reset email.');
       } finally {
         setLoading(false);
       }
     }
   };
 
-  const handleGoogleDemo = async () => {
+  const handleGoogleSignIn = async () => {
     setLoading(true);
     setFormError(null);
+    setInfoMessage(null);
     try {
-      const user = await localAuthService.continueWithGoogleDemo();
-      setAuthenticatedUser(user, true);
-      navigate('/onboarding');
+      const user = await firebaseAuthService.continueWithGoogle();
+      setAuthenticatedUser(user, false);
+      if (user.emailVerified) {
+        await hydrateFromCloud(user.id);
+      }
+      const prof = useAppStore.getState().profile;
+      navigate(prof?.onboardingCompleted ? '/dashboard' : '/onboarding');
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Google sign-in failed.');
     } finally {
       setLoading(false);
     }
@@ -260,7 +273,7 @@ export const AuthPage: React.FC = () => {
                 ? 'Sign In'
                 : mode === 'register'
                   ? 'Create Account & Start Onboarding'
-                  : 'Send Reset Instructions'}
+                  : 'Send Password Reset Email'}
             </Button>
           </form>
 
@@ -277,10 +290,10 @@ export const AuthPage: React.FC = () => {
                   type="button"
                   variant="outline"
                   loading={loading}
-                  onClick={handleGoogleDemo}
+                  onClick={handleGoogleSignIn}
                   className="w-full"
                 >
-                  Continue with Google (Demo)
+                  Continue with Google
                 </Button>
                 <Button
                   type="button"

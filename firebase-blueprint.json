@@ -1,0 +1,239 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Learner account profile, academic info, career target, and study preferences.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fullName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "college": { "type": "string", "maxLength": 160 },
+        "department": { "type": "string", "maxLength": 120 },
+        "academicYear": { "type": "string", "maxLength": 40 },
+        "educationLevel": { "type": "string", "maxLength": 60 },
+        "preferredLanguage": { "type": "string", "enum": ["English", "Tamil", "Tanglish"] },
+        "preferredLearningStyle": { "type": "string", "enum": ["video", "reading", "hands-on"] },
+        "targetCareerId": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "weeklyStudyHours": { "type": "number" },
+        "preferredStudyTime": { "type": "string", "enum": ["Morning", "Afternoon", "Evening", "Night"] },
+        "onboardingCompleted": { "type": "boolean" },
+        "publicPortfolioEnabled": { "type": "boolean" },
+        "leaderboardOptIn": { "type": "boolean" },
+        "streakDays": { "type": "integer" },
+        "streakFreezeAvailable": { "type": "integer" },
+        "restDayActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "fullName", "email", "targetCareerId", "weeklyStudyHours", "onboardingCompleted", "createdAt", "updatedAt"]
+    },
+    "SkillRecord": {
+      "title": "SkillRecord",
+      "description": "Verified skill proficiency and separate unverified self-reported rating for a learner.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "skill": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "verifiedScore": { "type": "number" },
+        "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+        "evidenceCount": { "type": "integer" },
+        "selfReportedRating": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "skill", "confidence", "evidenceCount", "createdAt", "updatedAt"]
+    },
+    "AssessmentConfig": {
+      "title": "AssessmentConfig",
+      "description": "Saved or generated assessment configuration scoped to a learner.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "mode": { "type": "string", "enum": ["topic", "daily", "challenge", "timed", "weekly", "baseline", "test-out"] },
+        "difficulty": { "type": "string", "enum": ["beginner", "intermediate", "advanced", "mixed"] },
+        "topics": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "mode", "difficulty", "topics", "createdAt", "updatedAt"]
+    },
+    "AssessmentAttemptRecord": {
+      "title": "AssessmentAttemptRecord",
+      "description": "Immutable scored assessment attempt with weak topics and explanations.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "mode": { "type": "string", "enum": ["topic", "daily", "challenge", "timed", "weekly", "baseline", "test-out"] },
+        "scorePercentage": { "type": "number" },
+        "correctCount": { "type": "integer" },
+        "totalQuestions": { "type": "integer" },
+        "topics": { "type": "array" },
+        "weakTopics": { "type": "array" },
+        "durationSeconds": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "mode", "scorePercentage", "correctCount", "totalQuestions", "topics", "weakTopics", "createdAt", "updatedAt"]
+    },
+    "RoadmapRecord": {
+      "title": "RoadmapRecord",
+      "description": "Versioned learning roadmap preserving prior history and diff summaries.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "version": { "type": "integer" },
+        "careerId": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "careerTitle": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 400 },
+        "lessons": { "type": "array" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "version", "careerId", "careerTitle", "reason", "lessons", "isActive", "createdAt", "updatedAt"]
+    },
+    "ProgressRecord": {
+      "title": "ProgressRecord",
+      "description": "Learner daily missions, flashcards, and adaptation history snapshot.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "completedLessonsCount": { "type": "integer" },
+        "totalMinutesLogged": { "type": "integer" },
+        "activeRoadmapVersion": { "type": "integer" },
+        "adaptations": { "type": "array" },
+        "flashcards": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "completedLessonsCount", "activeRoadmapVersion", "createdAt", "updatedAt"]
+    },
+    "ProjectSubmissionRecord": {
+      "title": "ProjectSubmissionRecord",
+      "description": "Student portfolio project submission with links and rubric feedback.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "projectIdeaId": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "level": { "type": "string", "enum": ["beginner", "intermediate", "advanced"] },
+        "description": { "type": "string", "minLength": 10, "maxLength": 2000 },
+        "githubUrl": { "type": "string", "maxLength": 300 },
+        "liveDemoUrl": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "projectIdeaId", "title", "level", "description", "createdAt", "updatedAt"]
+    },
+    "AchievementRecord": {
+      "title": "AchievementRecord",
+      "description": "Unlocked badge record backed by verified evidence.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "badgeId": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "evidenceNote": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "badgeId", "evidenceNote", "createdAt", "updatedAt"]
+    },
+    "XPTransactionRecord": {
+      "title": "XPTransactionRecord",
+      "description": "Immutable XP ledger entry keyed by unique activityId.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "activityId": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "type": { "type": "string", "enum": ["lesson", "quiz", "mini_project", "skill_mastery", "streak_bonus", "mission"] },
+        "amount": { "type": "integer" },
+        "description": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "activityId", "type", "amount", "description", "createdAt", "updatedAt"]
+    },
+    "AIConversationRecord": {
+      "title": "AIConversationRecord",
+      "description": "Pathy mentor chat messages and user feedback state.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "role": { "type": "string", "enum": ["user", "assistant"] },
+        "content": { "type": "string", "minLength": 1, "maxLength": 8000 },
+        "mode": { "type": "string", "maxLength": 40 },
+        "language": { "type": "string", "enum": ["English", "Tamil", "Tanglish"] },
+        "source": { "type": "string", "enum": ["gemini", "offline"] },
+        "feedback": { "type": "string", "enum": ["up", "down", "none"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "role", "content", "mode", "language", "source", "createdAt", "updatedAt"]
+    },
+    "AgentWorkflowRecord": {
+      "title": "AgentWorkflowRecord",
+      "description": "Logged execution step from the six-agent orchestrator pipeline.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "agentName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "status": { "type": "string", "enum": ["pending", "running", "validated", "completed", "failed"] },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "retriesUsed": { "type": "integer" },
+        "usedFallback": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "agentName", "status", "summary", "retriesUsed", "usedFallback", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Learner profile and preferences isolated to owner."
+    },
+    "/skills/{skillDocId}": {
+      "schema": { "$ref": "#/entities/SkillRecord" },
+      "description": "Per-learner verified and self-reported skill records."
+    },
+    "/assessments/{assessmentId}": {
+      "schema": { "$ref": "#/entities/AssessmentConfig" },
+      "description": "Learner-scoped assessment definitions."
+    },
+    "/assessment_attempts/{attemptId}": {
+      "schema": { "$ref": "#/entities/AssessmentAttemptRecord" },
+      "description": "Immutable scored assessment attempts."
+    },
+    "/roadmaps/{roadmapId}": {
+      "schema": { "$ref": "#/entities/RoadmapRecord" },
+      "description": "Versioned learning roadmaps preserving history."
+    },
+    "/progress/{progressId}": {
+      "schema": { "$ref": "#/entities/ProgressRecord" },
+      "description": "Learner progress, adaptation history, and spaced-repetition state."
+    },
+    "/projects/{projectId}": {
+      "schema": { "$ref": "#/entities/ProjectSubmissionRecord" },
+      "description": "Submitted student portfolio projects and rubric feedback."
+    },
+    "/achievements/{achievementId}": {
+      "schema": { "$ref": "#/entities/AchievementRecord" },
+      "description": "Unlocked badges scoped to the owning learner."
+    },
+    "/xp_transactions/{txId}": {
+      "schema": { "$ref": "#/entities/XPTransactionRecord" },
+      "description": "Append-only XP ledger entries preventing duplicate rewards."
+    },
+    "/ai_conversations/{messageId}": {
+      "schema": { "$ref": "#/entities/AIConversationRecord" },
+      "description": "Pathy mentor conversation turns and feedback."
+    },
+    "/agent_workflows/{workflowId}": {
+      "schema": { "$ref": "#/entities/AgentWorkflowRecord" },
+      "description": "Multi-agent orchestrator execution logs per learner."
+    }
+  }
+}

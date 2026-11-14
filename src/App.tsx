@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { useAppStore } from './store/useAppStore';
+import { firebaseAuthService } from './services/authService';
 import { AppLayout } from './layouts/AppLayout';
 import { LandingPage } from './pages/LandingPage';
 import { AuthPage } from './pages/AuthPage';
@@ -19,6 +20,22 @@ import { ProfilePage } from './pages/ProfilePage';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const user = useAppStore((s) => s.user);
+  const authReady = useAppStore((s) => s.authReady);
+
+  if (!authReady && !user) {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6">
+        <div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
+          <div className="h-5 w-40 rounded-lg bg-slate-200 dark:bg-slate-800 animate-pulse" />
+          <div className="h-24 w-full rounded-xl bg-slate-100 dark:bg-slate-800/60 animate-pulse" />
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Verifying your SkillPath AI session...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (!user) {
     return <Navigate to="/auth" replace />;
   }
@@ -27,6 +44,9 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
 export default function App() {
   const theme = useAppStore((s) => s.theme);
+  const setAuthenticatedUser = useAppStore((s) => s.setAuthenticatedUser);
+  const hydrateFromCloud = useAppStore((s) => s.hydrateFromCloud);
+  const setAuthReady = useAppStore((s) => s.setAuthReady);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -36,6 +56,26 @@ export default function App() {
       root.classList.remove('dark');
     }
   }, [theme]);
+
+  useEffect(() => {
+    const unsubscribe = firebaseAuthService.subscribeToAuthChanges((fbOrDemoUser) => {
+      if (fbOrDemoUser) {
+        if (!fbOrDemoUser.isDemo) {
+          setAuthenticatedUser(fbOrDemoUser, false);
+          if (fbOrDemoUser.emailVerified) {
+            void hydrateFromCloud(fbOrDemoUser.id);
+          }
+        }
+      } else {
+        const current = useAppStore.getState().user;
+        if (current && !current.isDemo) {
+          useAppStore.setState({ user: null });
+        }
+      }
+      setAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, [hydrateFromCloud, setAuthReady, setAuthenticatedUser]);
 
   return (
     <BrowserRouter>

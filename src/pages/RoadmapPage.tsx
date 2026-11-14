@@ -161,6 +161,9 @@ export const RoadmapPage: React.FC = () => {
                       </p>
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {lesson.isRemediation && <Badge tone="orange">Remediation</Badge>}
+                        {lesson.recommendedFormatOverride && (
+                          <Badge tone="pink">Format switched: {lesson.recommendedFormatOverride}</Badge>
+                        )}
                         {lesson.isAdvancedChallenge && <Badge tone="purple">Advanced Challenge</Badge>}
                         {lesson.cachedOffline && <Badge tone="blue">Cached offline</Badge>}
                       </div>

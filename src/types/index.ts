@@ -18,8 +18,10 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
-  provider: 'local' | 'google-demo';
+  provider: 'local' | 'google-demo' | 'firebase-email' | 'firebase-google';
   isDemo: boolean;
+  emailVerified?: boolean;
+  photoURL?: string;
   createdAt: string;
 }
 
@@ -237,6 +239,7 @@ export interface LessonItem {
   reasonForInclusion: string;
   isRemediation?: boolean;
   isAdvancedChallenge?: boolean;
+  recommendedFormatOverride?: LearningStyle;
   cachedOffline?: boolean;
 }
 

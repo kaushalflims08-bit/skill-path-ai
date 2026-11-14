@@ -50,7 +50,30 @@ import {
   updateFlashcardSM2,
 } from '../lib/roadmapEngine';
 import { runMultiAgentPipeline } from '../services/orchestrator';
-import { localAuthService } from '../services/authService';
+import { firebaseAuthService } from '../services/authService';
+import {
+  loadLearnerCloudState,
+  logAgentWorkflowStep,
+  recordXPTransaction,
+  saveAIConversationMessage,
+  saveAssessmentAttempt,
+  saveAssessmentConfig,
+  saveProjectSubmission,
+  saveRoadmapVersion,
+  saveUnlockedBadge,
+  syncSkillProficiency,
+  updateAIConversationFeedback,
+  upsertProgressSnapshot,
+  upsertUserProfile,
+} from '../services/firestoreService';
+
+function syncToCloud(user: AuthUser | null, task: (uid: string) => Promise<void>) {
+  if (typeof window === 'undefined') return;
+  if (!user || user.isDemo || !user.emailVerified) return;
+  void task(user.id).catch((err) => {
+    console.warn('Background Firestore sync issue:', err);
+  });
+}
 
 export interface ToastMessage {
   id: string;
@@ -106,11 +129,15 @@ export interface AppState {
   reportedBrokenResources: Record<string, number>;
   toasts: ToastMessage[];
   celebrationMessage: string | null;
+  authReady: boolean;
+  cloudSyncing: boolean;
 
   toggleTheme: () => void;
   pushToast: (toast: Omit<ToastMessage, 'id'>) => void;
   dismissToast: (id: string) => void;
   clearCelebration: () => void;
+  setAuthReady: (ready: boolean) => void;
+  hydrateFromCloud: (uid: string) => Promise<void>;
 
   // Auth & Demo
   loginDemoStudent: () => void;
@@ -173,6 +200,8 @@ export const useAppStore = create<AppState>()(
       reportedBrokenResources: {},
       toasts: [],
       celebrationMessage: null,
+      authReady: false,
+      cloudSyncing: false,
 
       toggleTheme: () =>
         set((state) => ({
@@ -192,8 +221,60 @@ export const useAppStore = create<AppState>()(
 
       clearCelebration: () => set({ celebrationMessage: null }),
 
+      setAuthReady: (ready) => set({ authReady: ready }),
+
+      hydrateFromCloud: async (uid) => {
+        set({ cloudSyncing: true });
+        try {
+          const cloud = await loadLearnerCloudState(uid);
+          const currentUser = get().user;
+          if (!currentUser || currentUser.isDemo || currentUser.id !== uid) return;
+
+          set((state) => {
+            const mergedProfile = cloud.profile
+              ? {
+                  ...(state.profile ?? createFreshProfile(currentUser)),
+                  ...cloud.profile,
+                  isDemoData: false,
+                }
+              : state.profile;
+            return {
+              profile: mergedProfile,
+              evidence: cloud.skills.length > 0 ? cloud.skills : state.evidence,
+              assessments: cloud.assessments.length > 0 ? cloud.assessments : state.assessments,
+              roadmapVersions:
+                cloud.roadmapVersions.length > 0 ? cloud.roadmapVersions : state.roadmapVersions,
+              activeRoadmapVersion:
+                cloud.roadmapVersions.length > 0
+                  ? cloud.activeRoadmapVersion
+                  : state.activeRoadmapVersion,
+              adaptations: cloud.adaptations.length > 0 ? cloud.adaptations : state.adaptations,
+              flashcards: cloud.flashcards.length > 0 ? cloud.flashcards : state.flashcards,
+              projects: cloud.projects.length > 0 ? cloud.projects : state.projects,
+              badges: cloud.badges.length > 0 ? cloud.badges : state.badges,
+              xpTransactions:
+                cloud.xpTransactions.length > 0 ? cloud.xpTransactions : state.xpTransactions,
+              mentorMessages:
+                cloud.mentorMessages.length > 0 ? cloud.mentorMessages : state.mentorMessages,
+              agentLogs: cloud.agentLogs.length > 0 ? cloud.agentLogs : state.agentLogs,
+            };
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '';
+          if (msg.includes('Quota exceeded')) {
+            get().pushToast({
+              title: 'Firestore free quota reached',
+              description: 'Cloud sync paused until daily quota resets. Local progress remains saved.',
+              tone: 'warning',
+            });
+          }
+        } finally {
+          set({ cloudSyncing: false });
+        }
+      },
+
       loginDemoStudent: () => {
-        localAuthService.setSession(DEMO_AUTH_USER);
+        firebaseAuthService.setDemoSession(DEMO_AUTH_USER);
         set({
           user: DEMO_AUTH_USER,
           profile: { ...DEMO_PROFILE, lastActiveAt: new Date().toISOString() },
@@ -230,11 +311,15 @@ export const useAppStore = create<AppState>()(
 
       setAuthenticatedUser: (user, isNewRegistration = false) => {
         const currentProfile = get().profile;
-        const shouldInitFresh = isNewRegistration || !currentProfile || currentProfile.isDemoData;
+        const prevUser = get().user;
+        const switchedAccount = prevUser && prevUser.id !== user.id;
+        const shouldInitFresh =
+          isNewRegistration || switchedAccount || !currentProfile || currentProfile.isDemoData;
         if (shouldInitFresh) {
+          const freshProfile = createFreshProfile(user);
           set({
             user,
-            profile: createFreshProfile(user),
+            profile: freshProfile,
             evidence: [],
             assessments: [],
             roadmapVersions: [],
@@ -259,22 +344,29 @@ export const useAppStore = create<AppState>()(
             projects: [],
             notifications: [],
           });
+          syncToCloud(user, (uid) => upsertUserProfile(uid, freshProfile));
         } else {
           set({ user });
         }
       },
 
       logout: async () => {
-        await localAuthService.logout();
+        await firebaseAuthService.logout();
         set({ user: null });
       },
 
-      updateProfile: (partial) =>
-        set((state) => ({
-          profile: state.profile
+      updateProfile: (partial) => {
+        const currentUser = get().user;
+        set((state) => {
+          const nextProfile = state.profile
             ? { ...state.profile, ...partial, lastActiveAt: new Date().toISOString() }
-            : null,
-        })),
+            : null;
+          if (nextProfile) {
+            syncToCloud(currentUser, (uid) => upsertUserProfile(uid, nextProfile));
+          }
+          return { profile: nextProfile };
+        });
+      },
 
       completeOnboarding: (finalProfile, baselineAttempt) => {
         const state = get();
@@ -345,8 +437,14 @@ export const useAppStore = create<AppState>()(
           proficiencies,
         });
 
+        const updatedProfile: LearnerProfile = {
+          ...finalProfile,
+          onboardingCompleted: true,
+          lastActiveAt: new Date().toISOString(),
+        };
+
         set({
-          profile: { ...finalProfile, onboardingCompleted: true, lastActiveAt: new Date().toISOString() },
+          profile: updatedProfile,
           evidence: nextEvidence,
           assessments: nextAssessments,
           xpTransactions: nextXp,
@@ -355,6 +453,30 @@ export const useAppStore = create<AppState>()(
           activeRoadmapVersion: v1.version,
           agentLogs: [...orchestration.steps, ...state.agentLogs].slice(0, 30),
           celebrationMessage: 'Onboarding complete! Your personalized roadmap is ready.',
+        });
+
+        syncToCloud(state.user, async (uid) => {
+          await upsertUserProfile(uid, updatedProfile);
+          await saveRoadmapVersion(uid, v1, true);
+          await upsertProgressSnapshot(uid, {
+            completedLessonsCount: 0,
+            totalMinutesLogged: 0,
+            activeRoadmapVersion: v1.version,
+            adaptations: state.adaptations,
+            flashcards: state.flashcards,
+          });
+          for (const prof of Object.values(proficiencies)) {
+            await syncSkillProficiency(uid, prof);
+          }
+          if (baselineAttempt) {
+            await saveAssessmentAttempt(uid, baselineAttempt);
+          }
+          for (const tx of nextXp) {
+            await recordXPTransaction(uid, tx);
+          }
+          for (const step of orchestration.steps) {
+            await logAgentWorkflowStep(uid, step);
+          }
         });
       },
 
@@ -433,6 +555,24 @@ export const useAppStore = create<AppState>()(
           ],
         });
 
+        syncToCloud(state.user, async (uid) => {
+          await upsertUserProfile(uid, updatedProfile);
+          if (currentVer) await saveRoadmapVersion(uid, currentVer, false);
+          await saveRoadmapVersion(uid, nextVersion, true);
+          await upsertProgressSnapshot(uid, {
+            completedLessonsCount: nextVersion.lessons.filter((l) => l.completed).length,
+            totalMinutesLogged: nextVersion.lessons
+              .filter((l) => l.completed)
+              .reduce((s, l) => s + l.estimatedMinutes, 0),
+            activeRoadmapVersion: nextVersion.version,
+            adaptations: [adaptation, ...state.adaptations],
+            flashcards: state.flashcards,
+          });
+          for (const step of orchestration.steps) {
+            await logAgentWorkflowStep(uid, step);
+          }
+        });
+
         get().pushToast({
           title: `Switched target to ${career.title}`,
           description: `Roadmap v${nextVersion.version} generated with your completed progress intact.`,
@@ -478,6 +618,14 @@ export const useAppStore = create<AppState>()(
           roadmapVersions: [...state.roadmapVersions, nextVer],
           activeRoadmapVersion: nextVer.version,
           agentLogs: [...orchestration.steps, ...state.agentLogs].slice(0, 30),
+        });
+
+        syncToCloud(state.user, async (uid) => {
+          if (currentVer) await saveRoadmapVersion(uid, currentVer, false);
+          await saveRoadmapVersion(uid, nextVer, true);
+          for (const step of orchestration.steps) {
+            await logAgentWorkflowStep(uid, step);
+          }
         });
 
         get().pushToast({
@@ -575,6 +723,29 @@ export const useAppStore = create<AppState>()(
           missions: nextMissions,
           badges: badgeEval.badges,
           celebrationMessage: celebration,
+        });
+
+        const updatedVer = nextVersions.find((v) => v.version === currentVer.version);
+        syncToCloud(state.user, async (uid) => {
+          if (updatedVer) {
+            await saveRoadmapVersion(uid, updatedVer, true);
+          }
+          await upsertProgressSnapshot(uid, {
+            completedLessonsCount: completedCount,
+            totalMinutesLogged: unlockedLessons
+              .filter((l) => l.completed)
+              .reduce((s, l) => s + l.estimatedMinutes, 0),
+            activeRoadmapVersion: currentVer.version,
+            adaptations: state.adaptations,
+            flashcards: state.flashcards,
+          });
+          for (const tx of nextXp) {
+            await recordXPTransaction(uid, tx);
+          }
+          for (const b of badgeEval.newlyUnlocked) {
+            const unlocked = badgeEval.badges.find((ub) => ub.badgeId === b.id);
+            if (unlocked) await saveUnlockedBadge(uid, unlocked);
+          }
         });
       },
 
@@ -754,9 +925,15 @@ export const useAppStore = create<AppState>()(
         if (attempt.scorePercentage < 50 && currentVer) {
           const primaryWeak = attempt.weakTopics[0] ?? attempt.topics[0];
           const isRepeated = (priorFailsByTopic.get(primaryWeak) ?? 0) >= 1;
+          const formatOverride = isRepeated
+            ? state.profile.preferredLearningStyle === 'hands-on'
+              ? 'video'
+              : 'hands-on'
+            : undefined;
           const { updatedLessons, insertedLesson } = insertRemediationLesson(
             currentVer.lessons,
             primaryWeak,
+            formatOverride,
           );
           const newVer = createRoadmapVersion({
             previousVersion: currentVer,
@@ -773,7 +950,9 @@ export const useAppStore = create<AppState>()(
               id: `adapt_low_${Date.now()}`,
               trigger: isRepeated ? 'Repeated struggle (2+ fails)' : 'Low quiz score (<50%)',
               whatChanged: `Added "${insertedLesson.title}" to Roadmap v${newVer.version}${
-                isRepeated ? ' and switched recommendation to video/interactive practice.' : '.'
+                isRepeated && formatOverride
+                  ? ` and switched resource format to ${formatOverride}.`
+                  : '.'
               }`,
               whyChanged: `${attempt.title} scored ${attempt.scorePercentage}% with weak performance in ${attempt.weakTopics.join(', ') || primaryWeak}.`,
               timestamp: new Date().toISOString(),
@@ -877,6 +1056,41 @@ export const useAppStore = create<AppState>()(
           agentLogs: [newAgentLog, ...state.agentLogs].slice(0, 30),
           celebrationMessage: celebration,
         });
+
+        syncToCloud(state.user, async (uid) => {
+          await saveAssessmentConfig(uid, {
+            id: attempt.id,
+            title: attempt.title,
+            mode: attempt.mode,
+            difficulty: attempt.difficulty,
+            topics: attempt.topics,
+          });
+          await saveAssessmentAttempt(uid, attempt);
+          for (const prof of Object.values(proficiencies)) {
+            await syncSkillProficiency(uid, prof);
+          }
+          const activeVer = nextVersions.find((v) => v.version === nextActiveVersion);
+          if (currentVer && activeVer && activeVer.version !== currentVer.version) {
+            await saveRoadmapVersion(uid, currentVer, false);
+            await saveRoadmapVersion(uid, activeVer, true);
+          }
+          await upsertProgressSnapshot(uid, {
+            completedLessonsCount,
+            totalMinutesLogged:
+              activeVer?.lessons.filter((l) => l.completed).reduce((s, l) => s + l.estimatedMinutes, 0) ?? 0,
+            activeRoadmapVersion: nextActiveVersion,
+            adaptations: nextAdaptations,
+            flashcards: state.flashcards,
+          });
+          for (const tx of nextXp) {
+            await recordXPTransaction(uid, tx);
+          }
+          for (const b of badgeEval.newlyUnlocked) {
+            const unlocked = badgeEval.badges.find((ub) => ub.badgeId === b.id);
+            if (unlocked) await saveUnlockedBadge(uid, unlocked);
+          }
+          await logAgentWorkflowStep(uid, newAgentLog);
+        });
       },
 
       addMistakesToFlashcards: (attempt) => {
@@ -939,17 +1153,23 @@ export const useAppStore = create<AppState>()(
         set({ flashcards: nextCards, xpTransactions: nextXp, missions: nextMissions });
       },
 
-      addMentorMessage: (msg) =>
+      addMentorMessage: (msg) => {
+        const user = get().user;
         set((state) => ({
           mentorMessages: [...state.mentorMessages, msg],
-        })),
+        }));
+        syncToCloud(user, (uid) => saveAIConversationMessage(uid, msg));
+      },
 
-      rateMentorMessage: (msgId, feedback) =>
+      rateMentorMessage: (msgId, feedback) => {
+        const user = get().user;
         set((state) => ({
           mentorMessages: state.mentorMessages.map((m) =>
             m.id === msgId ? { ...m, feedback } : m,
           ),
-        })),
+        }));
+        syncToCloud(user, (uid) => updateAIConversationFeedback(uid, msgId, feedback));
+      },
 
       clearMentorHistory: () =>
         set((state) => ({
@@ -1019,6 +1239,20 @@ export const useAppStore = create<AppState>()(
           xpTransactions: nextXp,
           badges: badgeEval.badges,
           celebrationMessage: `Project "${submission.title}" saved (+100 XP)!`,
+        });
+
+        syncToCloud(state.user, async (uid) => {
+          await saveProjectSubmission(uid, submission);
+          for (const prof of Object.values(proficiencies)) {
+            await syncSkillProficiency(uid, prof);
+          }
+          for (const tx of nextXp) {
+            await recordXPTransaction(uid, tx);
+          }
+          for (const b of badgeEval.newlyUnlocked) {
+            const unlocked = badgeEval.badges.find((ub) => ub.badgeId === b.id);
+            if (unlocked) await saveUnlockedBadge(uid, unlocked);
+          }
         });
       },
 

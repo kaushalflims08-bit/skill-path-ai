@@ -1,7 +1,20 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Clock, LogOut, Moon, RotateCcw, Save, Sun } from 'lucide-react';
+import {
+  CheckCircle2,
+  Clock,
+  KeyRound,
+  LogOut,
+  MailCheck,
+  Moon,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  ShieldAlert,
+  Sun,
+} from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
+import { firebaseAuthService } from '../services/authService';
 import { LearningStyle, PreferredLanguage } from '../types';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -13,8 +26,11 @@ export const ProfilePage: React.FC = () => {
   const user = useAppStore((s) => s.user);
   const profile = useAppStore((s) => s.profile);
   const theme = useAppStore((s) => s.theme);
+  const cloudSyncing = useAppStore((s) => s.cloudSyncing);
   const toggleTheme = useAppStore((s) => s.toggleTheme);
   const updateProfile = useAppStore((s) => s.updateProfile);
+  const setAuthenticatedUser = useAppStore((s) => s.setAuthenticatedUser);
+  const hydrateFromCloud = useAppStore((s) => s.hydrateFromCloud);
   const resetDemoStudent = useAppStore((s) => s.resetDemoStudent);
   const simulateInactivityCheck = useAppStore((s) => s.simulateInactivityCheck);
   const pushToast = useAppStore((s) => s.pushToast);
@@ -31,10 +47,11 @@ export const ProfilePage: React.FC = () => {
     profile?.preferredLearningStyle ?? 'hands-on',
   );
   const [weeklyStudyHours, setWeeklyStudyHours] = useState(profile?.weeklyStudyHours ?? 10);
+  const [authActionLoading, setAuthActionLoading] = useState(false);
 
   if (!profile) return null;
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     updateProfile({
       fullName,
@@ -45,11 +62,84 @@ export const ProfilePage: React.FC = () => {
       preferredLearningStyle,
       weeklyStudyHours,
     });
+    if (user && !user.isDemo) {
+      await firebaseAuthService.updateDisplayName(fullName).catch(() => undefined);
+    }
     pushToast({
       title: 'Profile updated',
-      description: 'Your study preferences and weekly hours have been saved.',
+      description:
+        user && !user.isDemo && user.emailVerified
+          ? 'Saved locally and synced to Firestore.'
+          : 'Your study preferences and weekly hours have been saved.',
       tone: 'success',
     });
+  };
+
+  const handleResendVerification = async () => {
+    setAuthActionLoading(true);
+    try {
+      await firebaseAuthService.resendVerificationEmail();
+      pushToast({
+        title: 'Verification email sent',
+        description: `Check ${user?.email} to verify your email and enable Firestore cloud sync.`,
+        tone: 'success',
+      });
+    } catch (err) {
+      pushToast({
+        title: 'Unable to send verification email',
+        description: err instanceof Error ? err.message : 'Please try again later.',
+        tone: 'error',
+      });
+    } finally {
+      setAuthActionLoading(false);
+    }
+  };
+
+  const handleRefreshVerification = async () => {
+    setAuthActionLoading(true);
+    try {
+      const refreshed = await firebaseAuthService.refreshCurrentUser();
+      if (refreshed) {
+        setAuthenticatedUser(refreshed, false);
+        if (refreshed.emailVerified) {
+          await hydrateFromCloud(refreshed.id);
+          pushToast({
+            title: 'Email verified!',
+            description: 'Cloud Firestore persistence is now active.',
+            tone: 'success',
+          });
+        } else {
+          pushToast({
+            title: 'Not verified yet',
+            description: 'Click the link in your inbox, then press Refresh again.',
+            tone: 'warning',
+          });
+        }
+      }
+    } finally {
+      setAuthActionLoading(false);
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    if (!user?.email) return;
+    setAuthActionLoading(true);
+    try {
+      const res = await firebaseAuthService.requestPasswordReset(user.email);
+      pushToast({
+        title: 'Password reset sent',
+        description: res.message,
+        tone: 'success',
+      });
+    } catch (err) {
+      pushToast({
+        title: 'Reset failed',
+        description: err instanceof Error ? err.message : 'Could not send reset email.',
+        tone: 'error',
+      });
+    } finally {
+      setAuthActionLoading(false);
+    }
   };
 
   const handleSignOut = async () => {
@@ -68,8 +158,83 @@ export const ProfilePage: React.FC = () => {
             Manage your study settings, language, theme, and account session.
           </p>
         </div>
-        {user?.isDemo && <Badge tone="orange">Demo Student Mode</Badge>}
+        <div className="flex items-center gap-2">
+          {user?.isDemo ? (
+            <Badge tone="orange">Demo Student Mode</Badge>
+          ) : user?.emailVerified ? (
+            <Badge tone="green">
+              {cloudSyncing ? 'Syncing Firestore...' : 'Firebase Verified'}
+            </Badge>
+          ) : (
+            <Badge tone="orange">Email Verification Pending</Badge>
+          )}
+        </div>
       </div>
+
+      {/* Firebase Account Security & Cloud Sync Status */}
+      {user && !user.isDemo && (
+        <Card className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
+              Account & Cloud Sync Status
+            </h3>
+            <span className="text-xs font-mono text-slate-500">
+              Provider: {user.provider === 'firebase-google' ? 'Google Sign-In' : 'Email / Password'}
+            </span>
+          </div>
+
+          {user.emailVerified ? (
+            <div className="flex items-center gap-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 px-3.5 py-2.5 text-xs text-emerald-800 dark:text-emerald-200">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              <span>
+                Your email is verified. Progress, assessments, roadmaps, XP transactions, and Pathy chats sync securely to your private Firestore workspace.
+              </span>
+            </div>
+          ) : (
+            <div className="space-y-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 p-3.5 text-xs text-amber-900 dark:text-amber-100">
+              <div className="flex items-start gap-2">
+                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  Our Zero-Trust Firestore rules require a verified email before writing to cloud collections. Your progress is saved locally in the meantime.
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  loading={authActionLoading}
+                  onClick={handleResendVerification}
+                >
+                  <MailCheck className="h-3.5 w-3.5" />
+                  <span>Resend Verification Email</span>
+                </Button>
+                <Button
+                  size="sm"
+                  loading={authActionLoading}
+                  onClick={handleRefreshVerification}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  <span>I&apos;ve Verified — Refresh</span>
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {user.provider === 'firebase-email' && (
+            <div>
+              <Button
+                size="sm"
+                variant="outline"
+                loading={authActionLoading}
+                onClick={handlePasswordReset}
+              >
+                <KeyRound className="h-3.5 w-3.5" />
+                <span>Send Password Reset Email</span>
+              </Button>
+            </div>
+          )}
+        </Card>
+      )}
 
       <Card>
         <form onSubmit={handleSave} className="space-y-4">

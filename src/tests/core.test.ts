@@ -200,5 +200,10 @@ describe('SkillPath AI Core Deterministic Engines', () => {
     expect(state.activeRoadmapVersion).toBeGreaterThan(initialVersion);
     expect(state.adaptations[0].trigger).toBe('Repeated struggle (2+ fails)');
     expect(state.notifications[0].title).toContain('We added review lessons');
+    const latestRoadmap = state.roadmapVersions.find(
+      (v) => v.version === state.activeRoadmapVersion,
+    );
+    const remedLesson = latestRoadmap?.lessons.find((l) => l.isRemediation);
+    expect(remedLesson?.recommendedFormatOverride).toBeDefined();
   });
 });

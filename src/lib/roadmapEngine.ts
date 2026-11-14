@@ -581,15 +581,26 @@ export function createRoadmapVersion(params: {
 export function insertRemediationLesson(
   lessons: LessonItem[],
   weakTopic: string,
+  formatOverride?: LearningStyle,
 ): { updatedLessons: LessonItem[]; insertedLesson: LessonItem } {
   const id = `lesson-remediation-${weakTopic.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now().toString().slice(-4)}`;
+  const formatResources: Record<LearningStyle, string[]> = {
+    video: ['res-cs50-python', 'res-js-fcc'],
+    'hands-on': ['res-js-fcc', 'res-dsa-leetcode'],
+    reading: ['res-js-async', 'res-html-mdn'],
+  };
+  const formatNote = formatOverride
+    ? ` Format automatically switched to ${formatOverride === 'hands-on' ? 'interactive hands-on practice' : formatOverride === 'video' ? 'guided video walkthrough' : 'concise structured reading'} after repeated struggle.`
+    : '';
   const insertedLesson: LessonItem = {
     id,
     stageTitle: 'Adaptive Remediation · Boost Focus',
     moduleTitle: `Review · ${weakTopic}`,
     topic: weakTopic,
-    title: `${weakTopic} Guided Review & Mistake Clinic`,
-    explanation: `Added automatically because your recent quiz score in ${weakTopic} was below 50%. Focuses on core mental models and step-by-step worked examples.`,
+    title: formatOverride
+      ? `${weakTopic} ${formatOverride === 'video' ? 'Video Walkthrough' : formatOverride === 'hands-on' ? 'Hands-On Drill' : 'Structured Review'} & Mistake Clinic`
+      : `${weakTopic} Guided Review & Mistake Clinic`,
+    explanation: `Added automatically because your recent quiz score in ${weakTopic} was below 50%. Focuses on core mental models and step-by-step worked examples.${formatNote}`,
     difficulty: 'beginner',
     estimatedMinutes: 35,
     learningObjectives: [
@@ -597,15 +608,18 @@ export function insertRemediationLesson(
       'Work through 3 annotated examples with Pathy',
       'Re-attempt a targeted confidence check',
     ],
-    resourceIds: ['res-js-fcc', 'res-html-mdn'],
+    resourceIds: formatOverride ? formatResources[formatOverride] : ['res-js-fcc', 'res-html-mdn'],
     practiceTask: `Review your missed ${weakTopic} flashcards and explain each rule in your own words.`,
     quizTopic: weakTopic,
     completed: false,
     unlocked: true,
     prerequisites: [],
     linkedSkillGap: weakTopic,
-    reasonForInclusion: `Adaptive Scenario A: Score below 50% triggered beginner remediation in ${weakTopic}.`,
+    reasonForInclusion: formatOverride
+      ? `Adaptive Scenario E: Repeated struggle switched format to ${formatOverride} in ${weakTopic}.`
+      : `Adaptive Scenario A: Score below 50% triggered beginner remediation in ${weakTopic}.`,
     isRemediation: true,
+    recommendedFormatOverride: formatOverride,
     cachedOffline: true,
   };
 
